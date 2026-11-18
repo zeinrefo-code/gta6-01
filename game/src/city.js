@@ -1,122 +1,117 @@
-// city.js — Solmar City: layout, districts, buildings, roads, landmarks, pickups.
-// The city is a 3600x3600 grid. Roads run every 400px; blocks between them hold
-// buildings, parks, parking lots and plazas. The south edge is Solmar Beach and the bay.
-import { makeRng, randi, pick } from './util.js';
+// city.js — Solmar City: 3600x3600 open world, road grid, districts, landmarks.
+import { mulberry32, dist } from './util.js';
 
 export const WORLD = 3600;
-export const ROAD_AT = [200, 600, 1000, 1400, 1800, 2200, 2600, 3000, 3400];
-export const ROAD_W = 96;
+export const ROAD_STEP = 300;
+export const ROAD_HALF = 46;
 
-export function buildCity(seed = 7) {
-  const rng = makeRng(seed);
-  const buildings = [];
-  const trees = [];
-  const lamps = [];
-  const parks = [];
-  const lots = [];
-  // District per block column/row: 0 downtown, 1 marina, 2 suburbs, 3 industrial.
-  function district(bx, by) {
-    const cx = bx * 400 + 200, cy = by * 400 + 200;
-    const dDown = Math.hypot(cx - 1800, cy - 1600);
-    if (cy > 3200) return 'beach';
-    if (dDown < 750) return 'downtown';
-    if (cx > 2900) return 'industrial';
-    if (cy < 700 || cx < 500) return 'suburbs';
-    return 'midtown';
-  }
-  const palette = {
-    downtown: ['#7a6a8f', '#5d6f8a', '#8a7a5d', '#6f7f6a', '#93706a'],
-    midtown: ['#b08d6a', '#8a7a6e', '#a08a7a', '#7d8a96', '#c0a080'],
-    suburbs: ['#d8b48f', '#e0c8a0', '#c8a888', '#b8c0a0'],
-    industrial: ['#8a8a86', '#707a72', '#9a8a7a'],
-    beach: ['#e8d8a8'],
-  };
-  for (let bx = 0; bx < 9; bx++) {
-    for (let by = 0; by < 9; by++) {
-      const x0 = bx * 400 + 248, y0 = by * 400 + 248, w = 304, h = 304;
-      const d = district(bx, by);
-      if (d === 'beach') { // sand, palms, no buildings
-        for (let i = 0; i < 5; i++) trees.push({ x: x0 + rng() * w, y: y0 + rng() * h, palm: true });
-        continue;
-      }
-      if (rng() < 0.16 && d !== 'downtown') { // park block
-        parks.push({ x: x0, y: y0, w, h });
-        for (let i = 0; i < 8; i++) trees.push({ x: x0 + 20 + rng() * (w - 40), y: y0 + 20 + rng() * (h - 40), palm: false });
-        continue;
-      }
-      if (rng() < 0.12) { // parking lot block
-        lots.push({ x: x0, y: y0, w, h });
-        continue;
-      }
-      const n = d === 'downtown' ? 1 : (rng() < 0.5 ? 2 : 4);
-      if (n === 1) {
-        buildings.push(makeBuilding(x0 + 30, y0 + 30, w - 60, h - 60, d, palette, rng, true));
-      } else if (n === 2) {
-        buildings.push(makeBuilding(x0 + 14, y0 + 40, w / 2 - 30, h - 80, d, palette, rng, false));
-        buildings.push(makeBuilding(x0 + w / 2 + 16, y0 + 40, w / 2 - 30, h - 80, d, palette, rng, false));
-      } else {
-        const hw = w / 2, hh = h / 2;
-        for (const [ox, oy] of [[0, 0], [hw, 0], [0, hh], [hw, hh]]) {
-          buildings.push(makeBuilding(x0 + ox + 12, y0 + oy + 12, hw - 24, hh - 24, d, palette, rng, false));
-        }
-      }
-      if (rng() < 0.7) trees.push({ x: x0 + rng() * w, y: y0 + rng() * h, palm: d === 'beach' });
+const ROADS = [];
+for (let i = 0; i < 12; i++) ROADS.push(150 + i * ROAD_STEP);
+
+export const LANDMARKS = {
+  garage: { name: "Rico's Garage", x: 600, y: 600, color: '#ffb347' },
+  club: { name: 'The Neon Palms Club', x: 1800, y: 900, color: '#ff5fa2' },
+  hospital: { name: 'Solmar General Hospital', x: 2700, y: 2700, color: '#7fe7ff' },
+  pier: { name: 'Bayview Pier', x: 3450, y: 1800, color: '#ffd166' },
+  docks: { name: 'Solmar Docks', x: 3000, y: 3450, color: '#9dff6e' },
+  bank: { name: 'Bayfront Bank', x: 1500, y: 2100, color: '#e8b4ff' },
+  plaza: { name: 'Sunset Plaza', x: 1200, y: 1500, color: '#ff8c69' },
+  beach: { name: 'Solmar Beach', x: 3450, y: 600, color: '#7fe7ff' },
+};
+
+function districtAt(x, y) {
+  if (x > 3150) return 'beach';
+  if (x > 2400 && y > 2700) return 'docks';
+  if (x < 1200 && y < 1200) return 'downtown';
+  if (x > 2100 && y < 1200) return 'marina';
+  if (x < 1200 && y > 2400) return 'suburbs';
+  if (x > 1800 && y > 1800 && x < 2700 && y < 2700) return 'park';
+  return 'downtown';
+}
+
+const DISTRICT_COLORS = {
+  downtown: '#3a2b52', marina: '#2b3a52', suburbs: '#33482e',
+  docks: '#4a3a28', park: '#2e4a2e', beach: '#4a3a52',
+};
+
+// Buildings: one or two per block, never on roads, never on landmarks.
+const buildings = [];
+{
+  const rng = mulberry32(20261118);
+  for (let bx = 0; bx < 11; bx++) for (let by = 0; by < 11; by++) {
+    const x0 = ROADS[bx] + ROAD_HALF + 14, x1 = ROADS[bx + 1] - ROAD_HALF - 14;
+    const y0 = ROADS[by] + ROAD_HALF + 14, y1 = ROADS[by + 1] - ROAD_HALF - 14;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const nearLandmark = Object.values(LANDMARKS).some(l => dist(l.x, l.y, cx, cy) < 260);
+    if (nearLandmark) continue;
+    const n = rng() < 0.45 ? 2 : 1;
+    for (let k = 0; k < n; k++) {
+      const w = 90 + rng() * 90, h = 90 + rng() * 90;
+      const ox = n === 1 ? 0 : (k === 0 ? -55 : 55);
+      const oy = n === 1 ? 0 : (k === 0 ? -40 : 40);
+      const d = districtAt(cx, cy);
+      buildings.push({
+        x: cx + ox - w / 2, y: cy + oy - h / 2, w, h,
+        color: ['#5b4a7a', '#6a4a6e', '#4a5a7a', '#7a5a4a', '#4a6a5a'][Math.floor(rng() * 5)],
+        roof: ['#2e2140', '#3a2a3a', '#24303e'][Math.floor(rng() * 3)],
+        tall: d === 'downtown' && rng() < 0.5,
+        district: d,
+      });
     }
   }
-  // Street lamps along roads.
-  for (const r of ROAD_AT) for (let t = 300; t < WORLD; t += 400) {
-    lamps.push({ x: r + 62, y: t }); lamps.push({ x: t, y: r - 62 });
+  // Landmark buildings (big, drawn distinctly)
+  for (const [key, l] of Object.entries(LANDMARKS)) {
+    buildings.push({ x: l.x - 70, y: l.y - 55, w: 140, h: 110, color: l.color, roof: '#241a33', tall: key === 'bank', district: 'landmark', landmark: key });
   }
-  return {
-    buildings, trees, lamps, parks, lots,
-    // Landmarks (name, x, y, colour) — all original.
-    landmarks: [
-      { name: 'Solmar Safehouse', kind: 'safehouse', x: 600, y: 600, color: '#4ade80' },
-      { name: 'Rico’s Garage', kind: 'garage', x: 1000, y: 1400, color: '#f59e0b' },
-      { name: 'First Solmar Bank', kind: 'bank', x: 1800, y: 1800, color: '#facc15' },
-      { name: 'Solmar General Hospital', kind: 'hospital', x: 2600, y: 1000, color: '#f87171' },
-      { name: 'Bayview Pier', kind: 'pier', x: 1800, y: 3450, color: '#38bdf8' },
-      { name: 'The Neon Palms Club', kind: 'club', x: 2200, y: 2200, color: '#e879f9' },
-      { name: 'Port Solmar Docks', kind: 'docks', x: 3200, y: 2600, color: '#94a3b8' },
-      { name: 'Solmar PD HQ', kind: 'pd', x: 1400, y: 2600, color: '#60a5fa' },
-    ],
-    // Cash stashes at intersections, so they are always reachable.
-    stashes: [
-      { x: 600, y: 1000 }, { x: 2400, y: 600 }, { x: 3200, y: 1800 }, { x: 800, y: 3000 },
-      { x: 2600, y: 2600 }, { x: 1400, y: 600 }, { x: 3400, y: 600 }, { x: 600, y: 2200 },
-    ],
-  };
 }
 
-function makeBuilding(x, y, w, h, d, palette, rng, tower) {
-  return {
-    x, y, w, h, district: d, tall: tower,
-    color: pick.call ? palette[d][Math.floor(rng() * palette[d].length)] : palette[d][0],
-    roof: rng() < 0.4 ? 'pool' : (rng() < 0.5 ? 'garden' : 'plain'),
-    hgt: tower ? 26 + rng() * 30 : 6 + rng() * 10,
-  };
+// Trees in the park district and along the beach.
+const trees = [];
+{
+  const rng = mulberry32(777);
+  for (let i = 0; i < 90; i++) {
+    const x = 1850 + rng() * 800, y = 1850 + rng() * 800;
+    if (!isRoad(x, y)) trees.push({ x, y, r: 12 + rng() * 10 });
+  }
+  for (let i = 0; i < 30; i++) trees.push({ x: 3250 + rng() * 250, y: 250 + rng() * 700, r: 12 + rng() * 8 });
 }
 
-// --- Road helpers ---------------------------------------------------------
-export function nearestRoadCoord(v) {
-  let best = ROAD_AT[0], bd = 1e9;
-  for (const r of ROAD_AT) { const d = Math.abs(v - r); if (d < bd) { bd = d; best = r; } }
+export function isRoad(x, y) {
+  for (const r of ROADS) if (Math.abs(x - r) < ROAD_HALF || Math.abs(y - r) < ROAD_HALF) return true;
+  return false;
+}
+export function isOnRoadAxis(x, y) { return ROADS.some(r => Math.abs(x - r) < 8) || ROADS.some(r => Math.abs(y - r) < 8); }
+export function collidesBuilding(x, y, r) {
+  for (const b of buildings) {
+    if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) return b;
+  }
+  return null;
+}
+export function nearestRoadPoint(x, y) {
+  let best = null, bd = 1e9;
+  for (const rx of ROADS) for (const ry of ROADS) {
+    const d = dist(x, y, rx, ry);
+    if (d < bd) { bd = d; best = { x: rx, y: ry }; }
+  }
+  // Also snap to nearest road line
+  let lx = x, ly = y;
+  let bx = ROADS[0]; for (const r of ROADS) if (Math.abs(r - x) < Math.abs(bx - x)) bx = r;
+  let by = ROADS[0]; for (const r of ROADS) if (Math.abs(r - y) < Math.abs(by - y)) by = r;
+  if (Math.abs(bx - x) < Math.abs(by - y)) lx = bx; else ly = by;
+  if (dist(x, y, lx, ly) < bd) return { x: lx, y: ly };
   return best;
 }
-export function onRoad(x, y) {
-  return ROAD_AT.some(r => Math.abs(x - r) < ROAD_W / 2) || ROAD_AT.some(r => Math.abs(y - r) < ROAD_W / 2);
+export function randomRoadPoint(rngFn) {
+  const r = rngFn || Math.random;
+  const a = ROADS[Math.floor(r() * ROADS.length)];
+  const b = ROADS[Math.floor(r() * ROADS.length)];
+  return Math.random() < 0.5 ? { x: a, y: 150 + r() * 3300 } : { x: 150 + r() * 3300, y: b };
 }
-export function roadPointNear(x, y) {
-  // Snap a point onto the nearest road centre line.
-  const rx = nearestRoadCoord(x), ry = nearestRoadCoord(y);
-  return Math.abs(x - rx) < Math.abs(y - ry) ? { x: rx, y } : { x, y: ry };
-}
-export function landmark(city, kind) {
-  return city.landmarks.find(l => l.kind === kind);
-}
-export function randomRoadPoint() {
-  const horizontal = Math.random() < 0.5;
-  const r = ROAD_AT[randi(0, ROAD_AT.length - 1)];
-  const t = randi(200, 3400);
-  return horizontal ? { x: t, y: r } : { x: r, y: t };
+export function getBuildings() { return buildings; }
+export function getTrees() { return trees; }
+export function getRoads() { return ROADS; }
+export function districtColorAt(x, y) { return DISTRICT_COLORS[districtAt(x, y)] || '#3a2b52'; }
+export function districtNameAt(x, y) {
+  const d = districtAt(x, y);
+  return { downtown: 'Downtown', marina: 'Marina', suburbs: 'Suburbs', docks: 'The Docks', park: 'Palm Park', beach: 'Solmar Beach' }[d];
 }

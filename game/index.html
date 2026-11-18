@@ -1,18 +1,18 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solmar Heat — Open-World Crime in Solmar City</title>
+<title>Solmar Heat — An open-world crime story</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1020; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  html,body{margin:0;padding:0;height:100%;background:#1a0b2e;overflow:hidden}
+  #game{display:block;width:100vw;height:100vh;cursor:crosshair}
+  #fallback{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:#fff;font:16px sans-serif;text-align:center;padding:20px}
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Solmar Heat: an open-world crime game. Explore Solmar City on foot and by car, take missions, outrun the police."></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<canvas id="game" width="1280" height="720"></canvas>
+<div id="fallback">Solmar Heat needs JavaScript and a modern desktop browser.</div>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

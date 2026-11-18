@@ -1,142 +1,110 @@
-// vehicles.js — car definitions, traffic AI, car physics, enter/exit/steal.
-// Cars are axis-free: heading in radians, arcade physics with drift and collisions
-// against buildings. Traffic cars follow road lanes and turn at intersections.
-import { clamp, dist, angDiff, rand, randi, pick, circleRectResolve } from './util.js';
-import { WORLD, ROAD_W, ROAD_AT, onRoad, randomRoadPoint } from './city.js';
+// vehicles.js — 7 car types, arcade driving physics, traffic AI, parked cars.
+import { clamp, rand, pick, angleDiff, dist } from './util.js';
+import { isRoad, collidesBuilding, randomRoadPoint, WORLD } from './city.js';
 
-export const CAR_TYPES = {
-  sedan:   { name: 'Solano Sedan',   color: '#c94f4f', len: 52, wid: 26, accel: 420, max: 430, grip: 3.2, price: 0 },
-  taxi:    { name: 'Bay Taxi',      color: '#f2c94c', len: 52, wid: 26, accel: 400, max: 410, grip: 3.2, price: 0 },
-  sport:   { name: 'Vortex GT',     color: '#e879f9', len: 54, wid: 26, accel: 620, max: 560, grip: 4.0, price: 0 },
-  van:     { name: 'Cargo Van',     color: '#94a3b8', len: 60, wid: 28, accel: 320, max: 350, grip: 2.6, price: 0 },
-  truck:   { name: 'Hauler Truck',  color: '#f59e0b', len: 72, wid: 30, accel: 280, max: 320, grip: 2.4, price: 0 },
-  police:  { name: 'Solmar PD Cruiser', color: '#e5e7eb', len: 54, wid: 27, accel: 560, max: 520, grip: 3.8, price: 0 },
-  classic: { name: 'Palms Classic', color: '#38bdf8', len: 56, wid: 27, accel: 380, max: 400, grip: 3.0, price: 0 },
-};
+export const CAR_TYPES = [
+  { key: 'vortex', name: 'Vortex GT', color: '#ff2e63', top: 240, accel: 46, brake: 80, steer: 2.9, hp: 120 },
+  { key: 'sedan', name: 'Solmar Sedan', color: '#4aa8ff', top: 165, accel: 30, brake: 65, steer: 2.4, hp: 100 },
+  { key: 'taxi', name: 'Sunset Taxi', color: '#ffd23f', top: 170, accel: 32, brake: 65, steer: 2.4, hp: 100 },
+  { key: 'hatch', name: 'Palm Hatchback', color: '#2ee6a8', top: 150, accel: 28, brake: 60, steer: 2.6, hp: 90 },
+  { key: 'van', name: 'Cargo Van', color: '#e8e8e8', top: 135, accel: 22, brake: 55, steer: 2.0, hp: 130 },
+  { key: 'truck', name: 'Haul Truck', color: '#ff8c42', top: 120, accel: 18, brake: 50, steer: 1.8, hp: 160 },
+  { key: 'cruiser', name: 'PD Cruiser', color: '#1a1a2e', top: 210, accel: 40, brake: 75, steer: 2.7, hp: 140 },
+];
 
-export function makeCar(x, y, type, opts = {}) {
-  const t = CAR_TYPES[type];
+export function makeCar(typeKey, x, y, angle, opts = {}) {
+  const t = CAR_TYPES.find(c => c.key === typeKey) || CAR_TYPES[1];
   return {
-    x, y, angle: opts.angle ?? 0, speed: 0, type, name: t.name, color: t.color,
-    len: t.len, wid: t.wid, accel: t.accel, max: t.max, grip: t.grip,
-    r: Math.max(t.len, t.wid) * 0.55, parked: !!opts.parked, traffic: !!opts.traffic,
-    police: type === 'police', driver: opts.traffic ? 'traffic' : null,
-    // traffic AI
-    dir: opts.dir ?? 0, lane: opts.lane ?? 0, cruise: opts.cruise ?? rand(150, 240),
-    turnAt: 0, hp: 100, smoke: 0, siren: 0, id: Math.random().toString(36).slice(2, 8),
+    type: t, x, y, angle: angle || 0, speed: 0, hp: t.hp, maxHp: t.hp,
+    parked: !!opts.parked, traffic: !!opts.traffic, police: !!opts.police,
+    aiAngle: angle || 0, aiSpeed: opts.aiSpeed || rand(28, 48),
+    dead: false, exploded: false, driver: opts.driver !== false,
+    w: t.key === 'truck' ? 62 : 46, h: t.key === 'truck' ? 24 : 22,
   };
 }
 
-export function spawnParkedCar(city, nearX, nearY) {
-  for (let tries = 0; tries < 20; tries++) {
+export function spawnTraffic(count, playerX, playerY) {
+  const cars = [];
+  for (let i = 0; i < count; i++) {
     const p = randomRoadPoint();
-    if (nearX !== undefined && dist(p.x, p.y, nearX, nearY) < 500) continue;
-    const horizontal = Math.abs(p.y - ROAD_AT[0]) < 1 || true;
-    const onH = ROAD_AT.some(r => Math.abs(p.y - r) < 2);
-    const angle = onH ? (Math.random() < 0.5 ? 0 : Math.PI) : (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-    const type = pick(['sedan', 'sedan', 'taxi', 'sport', 'van', 'classic']);
-    return makeCar(p.x, p.y, type, { angle, parked: true });
+    if (dist(p.x, p.y, playerX, playerY) < 260) continue;
+    const horizontal = Math.random() < 0.5;
+    const angle = horizontal ? (Math.random() < 0.5 ? 0 : Math.PI) : (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
+    const type = pick(CAR_TYPES.filter(t => t.key !== 'cruiser' && t.key !== 'vortex'));
+    cars.push(makeCar(type.key, p.x, p.y, angle, { traffic: true }));
   }
-  return makeCar(600, 200, 'sedan', { angle: 0, parked: true });
+  return cars;
 }
 
-// Traffic car steering: follow its road, turn at intersections, avoid the car ahead.
-export function updateTrafficCar(G, car, dt) {
-  const horizontal = Math.abs(Math.sin(car.angle)) < 0.7;
-  const targetSpeed = car.cruise;
-  // Slow for the car ahead.
-  let ahead = null, bestD = 130;
-  for (const o of G.cars) {
-    if (o === car) continue;
-    const d = dist(car.x, car.y, o.x, o.y);
-    if (d < bestD) {
-      const a = Math.atan2(o.y - car.y, o.x - car.x);
-      if (Math.abs(angDiff(car.angle, a)) < 0.6) { ahead = o; bestD = d; }
+export function spawnParked(count, playerX, playerY) {
+  const cars = [];
+  for (let i = 0; i < count; i++) {
+    const p = randomRoadPoint();
+    if (dist(p.x, p.y, playerX, playerY) < 200) continue;
+    const horizontal = Math.random() < 0.5;
+    const off = (Math.random() < 0.5 ? -1 : 1) * 34;
+    const angle = horizontal ? 0 : Math.PI / 2;
+    const x = horizontal ? p.x + rand(-120, 120) : p.x + off;
+    const y = horizontal ? p.y + off : p.y + rand(-120, 120);
+    if (collidesBuilding(x, y, 26)) continue;
+    const type = pick(CAR_TYPES.filter(t => t.key !== 'cruiser'));
+    cars.push(makeCar(type.key, x, y, angle + (Math.random() < 0.5 ? 0 : Math.PI), { parked: true }));
+  }
+  return cars;
+}
+
+// Player driving: arcade physics. dt seconds, input {up,down,left,right,hand}.
+export function drivePlayer(car, input, dt) {
+  const t = car.type;
+  const accel = input.up ? t.accel : 0;
+  const braking = input.down ? t.brake : 0;
+  car.speed += accel * dt;
+  if (braking) car.speed -= Math.sign(car.speed) * braking * dt;
+  car.speed -= car.speed * (input.hand ? 2.2 : 0.55) * dt;
+  car.speed = clamp(car.speed, -t.top * 0.35, t.top / 3.6);
+  const steerAmt = (input.left ? -1 : 0) + (input.right ? 1 : 0);
+  const grip = input.hand ? 1.6 : 1;
+  car.angle += steerAmt * t.steer * grip * dt * clamp(Math.abs(car.speed) / 14, 0, 1) * Math.sign(car.speed || 1);
+  const nx = car.x + Math.cos(car.angle) * car.speed * dt;
+  const ny = car.y + Math.sin(car.angle) * car.speed * dt;
+  if (!collidesBuilding(nx, car.y, 20)) car.x = nx; else car.speed *= 0.4;
+  if (!collidesBuilding(car.x, ny, 20)) car.y = ny; else car.speed *= 0.4;
+  car.x = clamp(car.x, 30, WORLD - 30);
+  car.y = clamp(car.y, 30, WORLD - 30);
+}
+
+export function updateTraffic(cars, dt, player) {
+  for (const c of cars) {
+    if (!c.traffic || c.dead) continue;
+    // Drive along current axis; at intersections sometimes turn.
+    const onH = Math.abs(Math.sin(c.angle)) < 0.5;
+    const target = c.aiAngle;
+    c.angle += angleDiff(c.angle, target) * Math.min(1, dt * 3);
+    const sp = c.aiSpeed;
+    const nx = c.x + Math.cos(c.angle) * sp * dt;
+    const ny = c.y + Math.sin(c.angle) * sp * dt;
+    const nearInter = isRoad(nx, ny) && Math.abs(nx % 300) < 60 || Math.abs(ny % 300) < 60;
+    if (isRoad(nx, ny) && !collidesBuilding(nx, ny, 20)) { c.x = nx; c.y = ny; }
+    else { c.aiAngle += Math.PI / 2; }
+    if (nearInter && Math.random() < dt * 0.25) {
+      c.aiAngle += (Math.random() < 0.5 ? -1 : 1) * Math.PI / 2;
     }
-  }
-  const p = G.player;
-  if (p.inCar !== car) {
-    const dp = dist(car.x, car.y, p.x, p.y);
-    if (dp < 110 && Math.abs(angDiff(car.angle, Math.atan2(p.y - car.y, p.x - car.x))) < 0.7) ahead = { x: p.x, y: p.y };
-  }
-  const want = ahead ? Math.max(0, targetSpeed - 220) : targetSpeed;
-  car.speed += clamp(want - car.speed, -500 * dt, 320 * dt);
-  // Lane keeping: steer toward the lane centre line.
-  const road = horizontal ? nearestRoadY(car.y) : nearestRoadX(car.x);
-  const laneOff = car.lane;
-  const desired = horizontal
-    ? Math.atan2((road + laneOff) - car.y, Math.cos(car.angle) >= 0 ? 1 : -1)
-    : Math.atan2(Math.sin(car.angle) >= 0 ? 1 : -1, (road + laneOff) - car.x);
-  // Simpler: steer heading toward the lane line.
-  const lineErr = horizontal ? (road + laneOff) - car.y : (road + laneOff) - car.x;
-  const steer = clamp(lineErr * 0.02, -1, 1) * (Math.cos(car.angle) >= 0 || !horizontal ? 1 : 1);
-  car.angle += clamp(angDiff(car.angle, horizontal ? (Math.cos(car.angle) >= 0 ? 0 : Math.PI) : (Math.sin(car.angle) >= 0 ? Math.PI / 2 : -Math.PI / 2)) + steer * 0.4, -2.2 * dt, 2.2 * dt);
-  // Intersection turns.
-  const nearCross = ROAD_AT.some(r => Math.abs(car.x - r) < 14) && ROAD_AT.some(r => Math.abs(car.y - r) < 14);
-  if (nearCross && car.turnAt <= 0 && Math.random() < 0.02) {
-    car.angle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
-    car.turnAt = 1.5;
-  }
-  car.turnAt -= dt;
-  car.x += Math.cos(car.angle) * car.speed * dt;
-  car.y += Math.sin(car.angle) * car.speed * dt;
-  collideBuildings(G, car);
-  if (car.x < 40 || car.y < 40 || car.x > WORLD - 40 || car.y > WORLD - 40) {
-    // Recycle far-away traffic to a road near the player.
-    const p2 = randomRoadPoint();
-    car.x = p2.x; car.y = p2.y;
+    // Avoid piling into the player: slow when close ahead
+    if (player && dist(c.x, c.y, player.x, player.y) < 70) c.aiSpeed = 12; else c.aiSpeed = clamp(c.aiSpeed + dt * 10, 12, 48);
+    // Keep inside world, wrap around edges by turning
+    if (c.x < 120 || c.x > WORLD - 120 || c.y < 120 || c.y > WORLD - 120) c.aiAngle += Math.PI;
   }
 }
 
-function nearestRoadX(x) { let b = ROAD_AT[0], bd = 1e9; for (const r of ROAD_AT) { const d = Math.abs(x - r); if (d < bd) { bd = d; b = r; } } return b; }
-function nearestRoadY(y) { return nearestRoadX(y); }
-
-// Player-driven car physics.
-export function driveCar(G, car, dt, input) {
-  const fwd = input.down('w', 'arrowup') ? 1 : input.down('s', 'arrowdown') ? -0.6 : 0;
-  const steer = (input.down('a', 'arrowleft') ? -1 : 0) + (input.down('d', 'arrowright') ? 1 : 0);
-  const handbrake = input.down(' ');
-  if (fwd > 0) car.speed += car.accel * dt;
-  else if (fwd < 0) car.speed -= car.accel * 0.7 * dt;
-  else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 180 * dt);
-  if (handbrake) car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 700 * dt);
-  car.speed = clamp(car.speed, -car.max * 0.45, car.max);
-  const spd = Math.abs(car.speed) / car.max;
-  car.angle += steer * car.grip * spd * (car.speed >= 0 ? 1 : -1) * dt * (handbrake ? 1.5 : 1);
-  car.x += Math.cos(car.angle) * car.speed * dt;
-  car.y += Math.sin(car.angle) * car.speed * dt;
-  if (collideBuildings(G, car)) {
-    if (Math.abs(car.speed) > 260) { G.audio.crash(); damageCar(G, car, 8); G.addShake(6); }
-    car.speed *= 0.45;
-  }
-  car.x = clamp(car.x, 30, WORLD - 30); car.y = clamp(car.y, 30, WORLD - 30);
-  if (car.hp <= 40) car.smoke = 1;
-  if (car.hp <= 0 && !car.dead) { car.dead = true; G.explosion(car.x, car.y); G.audio.crash(); }
+// Simple circle-vs-car collision for bullets / ramming.
+export function carHit(car, x, y, r) {
+  const dx = x - car.x, dy = y - car.y;
+  const ca = Math.cos(-car.angle), sa = Math.sin(-car.angle);
+  const lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
+  return Math.abs(lx) < car.w / 2 + r && Math.abs(ly) < car.h / 2 + r;
 }
-
-export function collideBuildings(G, car) {
-  let hit = false;
-  const c = { x: car.x, y: car.y, r: car.wid * 0.42 };
-  for (const b of G.city.buildings) {
-    if (car.x > b.x - 40 && car.x < b.x + b.w + 40 && car.y > b.y - 40 && car.y < b.y + b.h + 40) {
-      if (circleRectResolve(c, b)) { car.x = c.x; car.y = c.y; hit = true; }
-    }
-  }
-  return hit;
-}
-
-export function damageCar(G, car, n) {
-  car.hp -= n;
-  if (car.hp <= 0 && !car.dead) { car.dead = true; G.explosion(car.x, car.y); }
-}
-
-// Nearest car the player could enter (within 70px).
-export function nearestEnterableCar(G) {
-  let best = null, bd = 75;
-  for (const c of G.cars) {
-    if (c.dead) continue;
-    const d = dist(G.player.x, G.player.y, c.x, c.y);
-    if (d < bd) { bd = d; best = c; }
-  }
+export function nearestCar(cars, x, y, maxD) {
+  let best = null, bd = maxD;
+  for (const c of cars) { const d = dist(c.x, c.y, x, y); if (d < bd) { bd = d; best = c; } }
   return best;
 }

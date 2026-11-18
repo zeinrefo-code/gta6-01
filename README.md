@@ -1,57 +1,80 @@
-[![Solmar Heat — Make GTA 6](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![Rank](https://make.fun/badge/gta6-01/zeinrefo-code/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01)
-[![Reward](https://make.fun/badge/gta6-01/zeinrefo-code/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01)
+# Solmar Heat — an open-world crime story
 
-# Solmar Heat — an open-world crime game
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![rank](https://make.fun/badge/gta6-01/zeinrefo-code/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01)
+[![reward](https://make.fun/badge/gta6-01/zeinrefo-code/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01)
 
-Mara Voss comes home to Solmar City owing the wrong people money. Steal cars, run
-five story missions for Rico's garage, outrun the Solmar PD, and own the city — in
-a 100% original top-down open world built for the [Make GTA 6](https://make.fun/bounty/gta6-01)
-bounty on make.fun. No Rockstar/GTA names, characters, map or assets anywhere: the
-city, the people, the cars, the story and the music are all original.
+**Solmar Heat** is a complete open-world crime game set in the original
+sunset city of Solmar. You play **Mara Voss**, back in town and working for
+**Rico**, who runs a garage. Steal cars, outrun the Solmar PD, fight armed
+thugs, and run five story missions — from a homecoming drive to a
+four-star bank heist.
 
 ## Play it
 
+Serve `game/` with any static file server and open `game/index.html` in
+desktop Chrome. No build step, no network requests, no libraries — plain
+JavaScript, canvas 2D, and synthesised WebAudio sound.
+
 ```sh
-node serve.ts
+python3 -m http.server 8080 --directory game
 # open http://localhost:8080
 ```
 
-Or open `game/index.html` from any static file server. No build step, no network
-requests, no external assets — every script, image and sound is a file under
-`game/` (art is drawn in code, sound is synthesised with WebAudio).
-
 ## What's in the game
 
-- **Solmar City** — a 3600×3600 sun-soaked coastal city: downtown towers, the
-  marina, suburbs, the industrial docks, a park, and Solmar Beach and the bay.
-- **On foot and by car** — walk, sprint, steal any parked or traffic car (E),
-  drive with arcade physics, handbrake, and drive-by shooting.
-- **Traffic & pedestrians** — cars follow the road lanes and turn at
-  intersections; pedestrians stroll, flee gunfire, and panic.
-- **Wanted level** — 0–5 stars. Stealing, shooting and running people over raise
-  the heat; PD cruisers chase and ram you, foot cops move in to arrest you at
-  2+ stars. Lay low and stay clean to cool off.
-- **Missions & story** — five jobs with objectives, dialogue and payouts:
-  Homecoming, Hot Wheels, Debt Collection, The Getaway, and the Bayfront Heist.
-- **Combat** — mouse-aimed pistol on foot and from the car, enemy thugs who
-  shoot back, explosions, health and repair pickups, cash stashes to find.
-- **HUD** — health, money, score, wanted stars, mission objective, speedometer,
-  and a live minimap of the whole city.
-- **Menus & save** — title screen, how-to-play, mission list, pause menu, and
-  localStorage saves (autosaves after every mission and on pause).
+- **Open world** — Solmar City (3600×3600): downtown, marina, suburbs,
+  docks, Palm Park, and Solmar Beach, with a road grid, traffic, parked
+  cars, pedestrians, and named landmarks (Rico's Garage, The Neon Palms
+  Club, Solmar General Hospital, Bayview Pier, the docks, Bayfront Bank).
+- **Driving** — 7 car types (Vortex GT sports car, sedan, taxi, hatchback,
+  van, truck, PD cruiser) with arcade physics, traffic AI, and drive-by
+  shooting.
+- **Wanted system** — 0–5 stars. Stealing cars, hitting pedestrians, and
+  taking down cops raise the heat; PD cruisers chase and ram, foot cops
+  arrest at 2+ stars, and heat cools off when you lay low. BUSTED and
+  WASTED screens respawn you at the hospital.
+- **Story** — 5 missions with dialogue, objectives, map markers, timers,
+  cash rewards, and autosave: Homecoming, Hot Wheels, Debt Collection,
+  The Getaway, and the Bayfront Heist. Then free roam.
+- **Combat** — mouse-aimed pistol shooting on foot and from a car, enemy
+  thugs who shoot back, car explosions, particles, health/cash/ammo
+  pickups.
+- **HUD & menus** — health, money, score, wanted stars, mission tracker
+  with timer, live minimap, speedometer and car HP, title screen, pause
+  menu, how-to-play, and mission list. Saves to localStorage.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
 | WASD / arrows | Move / drive |
-| Shift | Sprint |
-| E | Enter / exit car (stealing raises wanted) |
 | Mouse + click | Aim / shoot |
-| Space | Handbrake |
-| M | Mission list |
-| P / Esc | Pause & save |
+| E | Enter / exit car |
+| Shift | Run |
+| P | Pause & autosave |
+| M | Mute |
 
-Built by an AI agent in a recorded session for make.fun's gta6-01 bounty.
-Referral: https://make.fun/r/bxjfe4p7
+## Structure
+
+```
+game/
+  index.html        entry page
+  src/
+    util.js         math + random helpers
+    city.js         Solmar City, roads, buildings, landmarks
+    vehicles.js     car types, driving physics, traffic AI
+    people.js       pedestrians, thugs, foot cops
+    police.js       wanted system, chases, arrests
+    missions.js     5-mission story chain
+    combat.js       shooting, bullets, explosions, pickups
+    render.js       camera, world drawing, minimap, HUD, menus
+    audio.js        synthesised SFX + synthwave music
+    save.js         localStorage saves
+    input.js        keyboard + mouse
+    main.js         game loop + state machine
+```
+
+A 100% original game. Not affiliated with Rockstar Games or Grand Theft Auto.
+
+MIT licensed — see `LICENSE`.

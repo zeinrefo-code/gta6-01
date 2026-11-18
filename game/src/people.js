@@ -1,126 +1,86 @@
-// people.js — pedestrians, thugs and on-foot police.
-// Peds stroll the sidewalks, flee gunfire and panic when a car barrels at them.
-// Thugs are mission enemies: they chase and punch/shoot the player. Foot cops
-// chase the player when wanted and try to arrest them.
-import { clamp, dist, angTo, rand, randi, pick, circleRectResolve } from './util.js';
-import { WORLD, onRoad, randomRoadPoint } from './city.js';
+// people.js — pedestrians, armed thugs, foot cops.
+import { rand, pick, dist, angleTo, clamp } from './util.js';
+import { isRoad, collidesBuilding, WORLD, randomRoadPoint } from './city.js';
 
-const PED_COLORS = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6', '#facc15', '#2dd4bf'];
-const PED_SHIRTS = ['#e11d48', '#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d'];
+const PED_COLORS = ['#ffd166', '#ef476f', '#06d6a0', '#118ab2', '#f78c6b', '#c77dff', '#90be6d', '#f9c74f'];
+const NAMES = ['Ana', 'Ben', 'Cleo', 'Dario', 'Elsa', 'Felix', 'Gia', 'Hugo', 'Ivy', 'Jonas', 'Kira', 'Leo'];
 
 export function makePed(x, y) {
   return {
-    kind: 'ped', x, y, r: 11, angle: rand(0, Math.PI * 2), speed: rand(35, 65),
-    color: pick(PED_COLORS), shirt: pick(PED_SHIRTS), state: 'walk', panic: 0,
-    target: null, walkT: rand(2, 6), hp: 30, dead: false, fleeT: 0,
+    kind: 'ped', name: pick(NAMES), x, y, angle: rand(0, Math.PI * 2),
+    speed: rand(14, 26), color: pick(PED_COLORS), hp: 50, dead: false,
+    flee: 0, walkT: rand(0, 4), target: null,
   };
 }
-
-export function makeThug(x, y, hp = 60) {
+export function makeThug(x, y) {
   return {
-    kind: 'thug', x, y, r: 12, angle: 0, speed: 120, color: '#1f2937', shirt: '#991b1b',
-    state: 'chase', panic: 0, target: null, walkT: 0, hp, dead: false, fleeT: 0,
-    shootT: rand(1, 2), punchT: 0,
+    kind: 'thug', name: 'Thug', x, y, angle: rand(0, Math.PI * 2),
+    speed: 30, color: '#2b2b3a', hp: 90, dead: false, flee: 0,
+    shootCd: rand(0.5, 1.5), walkT: 0, target: null,
   };
 }
-
-export function makeFootCop(x, y) {
+export function makeCop(x, y) {
   return {
-    kind: 'cop', x, y, r: 12, angle: 0, speed: 165, color: '#1e3a8a', shirt: '#1e40af',
-    state: 'chase', panic: 0, target: null, walkT: 0, hp: 80, dead: false, fleeT: 0,
-    punchT: 0, arrestT: 0,
+    kind: 'cop', name: 'Officer', x, y, angle: rand(0, Math.PI * 2),
+    speed: 52, color: '#1a2a6b', hp: 100, dead: false, flee: 0,
+    arrestT: 0, walkT: 0, target: null,
   };
 }
 
-export function spawnPeds(G, n) {
-  for (let i = 0; i < n; i++) {
+export function spawnPeds(count, px, py) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
     const p = randomRoadPoint();
-    G.peds.push(makePed(p.x + rand(-60, 60), p.y + rand(-60, 60)));
+    if (dist(p.x, p.y, px, py) > 700) continue;
+    out.push(makePed(p.x + rand(-40, 40), p.y + rand(-40, 40)));
   }
+  // Top up with peds near the player on roads.
+  while (out.length < count) {
+    const a = rand(0, Math.PI * 2), d = rand(120, 600);
+    const x = clamp(px + Math.cos(a) * d, 80, WORLD - 80);
+    const y = clamp(py + Math.sin(a) * d, 80, WORLD - 80);
+    out.push(makePed(x, y));
+  }
+  return out.slice(0, count);
 }
 
-// Keep the crowd near the player: recycle distant peds to nearby roads.
-export function maintainPeds(G) {
-  const p = G.player;
-  G.peds = G.peds.filter(pd => !pd.dead || pd.deadT < 6);
-  for (const pd of G.peds) if (pd.dead) pd.deadT = (pd.deadT || 0) + 1 / 60;
-  while (G.peds.filter(pd => !pd.dead).length < 26) {
-    const q = randomRoadPoint();
-    const near = { x: p.x + (q.x - p.x) * 0.2 + rand(-300, 300), y: p.y + (q.y - p.y) * 0.2 + rand(-300, 300) };
-    G.peds.push(makePed(clamp(near.x, 60, WORLD - 60), clamp(near.y, 60, WORLD - 60)));
-  }
-  for (const pd of G.peds) {
-    if (!pd.dead && dist(pd.x, pd.y, p.x, p.y) > 1400) {
-      const q = randomRoadPoint();
-      pd.x = clamp(p.x + rand(-500, 500), 60, WORLD - 60);
-      pd.y = clamp(p.y + rand(-500, 500), 60, WORLD - 60);
+export function updatePeople(people, dt, player, gunfireAt) {
+  for (const p of people) {
+    if (p.dead) continue;
+    if (p.kind === 'thug') {
+      // Thugs hold ground and shoot at the player when close.
+      const d = dist(p.x, p.y, player.x, player.y);
+      if (d < 420) p.angle = angleTo(p.x, p.y, player.x, player.y);
+      continue;
     }
-  }
-}
-
-export function updatePerson(G, pd, dt) {
-  if (pd.dead) return;
-  const p = G.player;
-  const dPlayer = dist(pd.x, pd.y, p.x, p.y);
-  // Panic: gunfire nearby, or a fast car close by.
-  if (G.gunfireT > 0 && dPlayer < 500) pd.panic = Math.max(pd.panic, 1.5);
-  if (pd.kind === 'ped') {
-    if (pd.panic > 0) {
-      pd.panic -= dt;
-      const a = angTo(p.x, p.y, p.x, p.y) + Math.PI;
-      pd.x += Math.cos(a) * 170 * dt; pd.y += Math.sin(a) * 170 * dt;
-      pd.angle = a;
-    } else {
-      pd.walkT -= dt;
-      if (pd.walkT <= 0) {
-        pd.walkT = rand(2, 6);
-        pd.angle = pick([0, Math.PI / 2, Math.PI, -Math.PI / 2]) + rand(-0.2, 0.2);
+    if (p.kind === 'cop') {
+      // Foot cops chase the player when wanted >= 2.
+      const d = dist(p.x, p.y, player.x, player.y);
+      if (d < 700) {
+        p.angle = angleTo(p.x, p.y, player.x, player.y);
+        const nx = p.x + Math.cos(p.angle) * p.speed * dt;
+        const ny = p.y + Math.sin(p.angle) * p.speed * dt;
+        if (!collidesBuilding(nx, ny, 12)) { p.x = nx; p.y = ny; }
+        if (d < 34) p.arrestT += dt; else p.arrestT = 0;
       }
-      pd.x += Math.cos(pd.angle) * pd.speed * dt;
-      pd.y += Math.sin(pd.angle) * pd.speed * dt;
-      if (!onRoad(pd.x, pd.y) && Math.random() < 0.02) pd.angle += Math.PI / 2;
+      continue;
     }
-  } else if (pd.kind === 'thug') {
-    const a = angTo(pd.x, pd.y, p.x, p.y);
-    pd.angle = a;
-    const d = dPlayer;
-    // Separation: don't pile onto the same spot as other thugs/cops.
-    for (const o of G.peds) {
-      if (o === pd || o.dead || (o.kind !== 'thug' && o.kind !== 'cop')) continue;
-      const dd = dist(pd.x, pd.y, o.x, o.y);
-      if (dd < 30 && dd > 0.01) { pd.x += (pd.x - o.x) / dd * 40 * dt; pd.y += (pd.y - o.y) / dd * 40 * dt; }
-    }
-    if (d > 34) { pd.x += Math.cos(a) * pd.speed * dt; pd.y += Math.sin(a) * pd.speed * dt; }
-    pd.shootT -= dt;
-    if (d < 420 && pd.shootT <= 0 && p.inCar === null) {
-      pd.shootT = rand(1.4, 2.4);
-      G.enemyShoot(pd.x, pd.y, a);
-    }
-    if (d < 30) {
-      pd.punchT -= dt;
-      if (pd.punchT <= 0) { pd.punchT = 0.9; G.hurtPlayer(8, pd.x, pd.y); G.audio.punch(); }
-    }
-  } else if (pd.kind === 'cop') {
-    const a = angTo(pd.x, pd.y, p.x, p.y);
-    pd.angle = a;
-    if (p.inCar) {
-      // Foot cop can't catch a car: jog after it, then give up and radio a car.
-      pd.x += Math.cos(a) * pd.speed * 0.7 * dt; pd.y += Math.sin(a) * pd.speed * 0.7 * dt;
-      if (dPlayer > 700) pd.dead = true; // despawn, replaced by a cruiser
+    // Pedestrians: stroll along sidewalks, flee gunfire.
+    if (gunfireAt && dist(p.x, p.y, gunfireAt.x, gunfireAt.y) < 320) p.flee = 2.5;
+    if (p.flee > 0) {
+      p.flee -= dt;
+      p.angle = angleTo(gunfireAt ? gunfireAt.x : p.x, gunfireAt ? gunfireAt.y : p.y, p.x, p.y);
+      const sp = 68;
+      const nx = p.x + Math.cos(p.angle) * sp * dt;
+      const ny = p.y + Math.sin(p.angle) * sp * dt;
+      if (!collidesBuilding(nx, ny, 10)) { p.x = nx; p.y = ny; }
     } else {
-      if (dPlayer > 26) { pd.x += Math.cos(a) * pd.speed * dt; pd.y += Math.sin(a) * pd.speed * dt; }
-      else {
-        pd.arrestT += dt;
-        if (pd.arrestT > 2.5) G.busted('A Solmar PD officer cuffed you on the sidewalk.');
-      }
+      p.walkT -= dt;
+      if (p.walkT <= 0) { p.walkT = rand(2, 5); p.angle = rand(0, Math.PI * 2); }
+      const nx = p.x + Math.cos(p.angle) * p.speed * dt;
+      const ny = p.y + Math.sin(p.angle) * p.speed * dt;
+      if (!collidesBuilding(nx, ny, 10) && nx > 60 && nx < WORLD - 60 && ny > 60 && ny < WORLD - 60) { p.x = nx; p.y = ny; }
+      else p.walkT = 0;
     }
   }
-  // Building collision + world clamp.
-  const c = { x: pd.x, y: pd.y, r: pd.r };
-  for (const b of G.city.buildings) {
-    if (pd.x > b.x - 30 && pd.x < b.x + b.w + 30 && pd.y > b.y - 30 && pd.y < b.y + b.h + 30) {
-      if (circleRectResolve(c, b)) { pd.x = c.x; pd.y = c.y; }
-    }
-  }
-  pd.x = clamp(pd.x, 30, WORLD - 30); pd.y = clamp(pd.y, 30, WORLD - 30);
 }

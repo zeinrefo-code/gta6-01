@@ -1,27 +1,35 @@
-// input.js — keyboard + mouse state, with edge-triggered "just pressed" keys.
-// I wrote this file fresh for Solmar Heat; it replaces the starter's input module.
-export function createInput(canvas) {
-  const I = {
-    keys: {}, pressed: {}, mouse: { x: 0, y: 0, down: false, clicked: false },
-    init() {
-      window.addEventListener('keydown', (e) => {
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
-        const k = e.key.toLowerCase();
-        if (!this.keys[k]) this.pressed[k] = true;
-        this.keys[k] = true;
-      });
-      window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
-      canvas.addEventListener('mousemove', (e) => {
-        const r = canvas.getBoundingClientRect();
-        this.mouse.x = e.clientX - r.left; this.mouse.y = e.clientY - r.top;
-      });
-      canvas.addEventListener('mousedown', (e) => { if (e.button === 0) { this.mouse.down = true; this.mouse.clicked = true; } });
-      window.addEventListener('mouseup', () => { this.mouse.down = false; });
-      window.addEventListener('blur', () => { this.keys = {}; this.mouse.down = false; });
-    },
-    down(...names) { return names.some(n => this.keys[n]); },
-    hit(...names) { return names.some(n => this.pressed[n]); },
-    endFrame() { this.pressed = {}; this.mouse.clicked = false; },
-  };
-  return I;
+// input.js — keyboard + mouse state.
+export class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.mouseX = 640; this.mouseY = 360;
+    this.mouseDown = false; this.clicked = false;
+    this.pressed = new Set();
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.key)) e.preventDefault();
+      if (!this.keys.has(e.code)) this.pressed.add(e.code);
+      this.keys.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+    canvas.addEventListener('mousemove', (e) => {
+      const r = canvas.getBoundingClientRect();
+      this.mouseX = (e.clientX - r.left) * (canvas.width / r.width);
+      this.mouseY = (e.clientY - r.top) * (canvas.height / r.height);
+    });
+    canvas.addEventListener('mousedown', (e) => { if (e.button === 0) { this.mouseDown = true; this.clicked = true; } });
+    window.addEventListener('mouseup', () => { this.mouseDown = false; });
+  }
+  down(code) { return this.keys.has(code); }
+  wasPressed(code) { return this.pressed.has(code); }
+  endFrame() { this.pressed.clear(); this.clicked = false; }
+  moveVec() {
+    let x = 0, y = 0;
+    if (this.down('KeyA') || this.down('ArrowLeft')) x -= 1;
+    if (this.down('KeyD') || this.down('ArrowRight')) x += 1;
+    if (this.down('KeyW') || this.down('ArrowUp')) y -= 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) y += 1;
+    const len = Math.hypot(x, y) || 1;
+    return { x: x / len, y: y / len, active: x !== 0 || y !== 0 };
+  }
 }
