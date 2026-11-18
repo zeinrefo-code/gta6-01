@@ -2,7 +2,7 @@
 // It copies game/ and screenshots/ from this repository into the output
 // directory (MAKEFUN_OUTPUT_DIR, or /output) and writes dossier.json with
 // the vendored make.fun library, which the scorer re-derives byte for byte.
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -11,8 +11,12 @@ const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 // Start from a clean output directory so repeated runs are byte-identical.
-rmSync(outputDir, { recursive: true, force: true });
+// The output directory itself may be a mounted volume (the grader mounts
+// /output), so never remove the root — clear only its contents.
 mkdirSync(outputDir, { recursive: true });
+for (const entry of readdirSync(outputDir)) {
+  rmSync(join(outputDir, entry), { recursive: true, force: true });
+}
 
 const gameSrc = join(repoRoot, 'game');
 const shotsSrc = join(repoRoot, 'screenshots');
